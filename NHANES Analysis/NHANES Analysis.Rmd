@@ -1,0 +1,134 @@
+---
+title: "Problem_Set_2"
+author: "PS Group 18"
+date: "1/18/2018"
+output: pdf_document
+---
+
+```{r}
+library(ggplot2)
+library(tidyr)
+library(NHANES)
+
+Adults = subset(NHANES, Age >= 18)
+Adults = Adults[c("Height", "Gender", "Age", "Weight")]
+summary(Adults)
+```
+
+```{r}
+colSums(is.na(Adults))
+```
+
+There are 57 missing values of Height and 61 missing values of Weight.
+
+### Q1 
+
+```{r}
+ggplot(Adults, aes(sample = Height)) + stat_qq() + facet_grid(~Gender)
+```
+
+It seems that the Heights of Male and Female are both normal. We can safely replace the missing values with mean.
+
+```{r}
+Male_heights = Adults$Height[Adults$Gender == "male"]
+Female_heights = Adults$Height[Adults$Gender == "female"]
+
+avg_male_heights = mean(Male_heights, na.rm = TRUE)
+avg_female_heights = mean(Female_heights, na.rm = TRUE)
+
+Adults$Height = ifelse(is.na(Adults$Height) & Adults$Gender == "male", avg_male_heights,
+                       ifelse(is.na(Adults$Height) & Adults$Gender == "female",
+                              avg_female_heights, Adults$Height))
+
+sum(is.na(Adults$Height))
+```
+
+
+```{r}
+Male_heights = Adults$Height[Adults$Gender == "male"]
+Female_heights = Adults$Height[Adults$Gender == "female"]
+
+ggplot(Adults, aes(x = Height, colour = Gender)) + geom_density(adjust = 0.5) +
+  geom_vline(data = data.frame(xint = avg_male_heights, Gender = "male"), 
+             aes(xintercept = xint), colour = "cyan", linetype = "dotdash") +
+    geom_vline(data = data.frame(xint = avg_female_heights, Gender = "female"), 
+               aes(xintercept = xint), colour = "red", linetype = "dotdash") +
+  labs(x = "Height (cm)", y = "Density", title = "Density plot - Height by Gender")
+```
+
+It seems that both male and female height have a similar distribution and spread but with a shift in their centers.
+
+```{r}
+qqplot(Male_heights, Female_heights, main = "QQ plot: Male vs Female Heights",
+       xlab = "Male Height (cm)", ylab = "Female Height (cm)")
+abline(0, 1, col = "red")
+```
+
+From the QQ Plot and denisty plot we can clearly see that the height distributions can be explained by an additive shift. The male height is on average 13-14 cm greater than the female height.
+
+
+### Q2
+
+```{r}
+ggplot(Adults, aes(sample = Weight)) + stat_qq() + facet_grid(~Gender)
+```
+
+The male and female weights are not normal, hence we can replace the missing values with median.
+
+```{r}
+Male_weights = Adults$Weight[Adults$Gender == "male"]
+Female_weights = Adults$Weight[Adults$Gender == "female"]
+
+median_male_weights = median(Male_weights, na.rm = TRUE)
+median_female_weights = median(Female_weights, na.rm = TRUE)
+
+Adults$Weight = ifelse(is.na(Adults$Weight) & Adults$Gender == "male", median_male_weights,
+                       ifelse(is.na(Adults$Weight) & Adults$Gender == "female",
+                              median_female_weights, Adults$Weight))
+
+sum(is.na(Adults$Weight))
+```
+
+
+```{r}
+ggplot(Adults, aes(x = Weight, colour = Gender)) + geom_density(adjust = 0.5) +
+  geom_vline(data = data.frame(xint = median_male_weights, Gender = "male"), 
+             aes(xintercept = xint), colour = "cyan", linetype = "dotdash") +
+  geom_vline(data = data.frame(xint = median_female_weights, Gender = "female"), 
+             aes(xintercept = xint), colour = "red", linetype = "dotdash") +
+  labs(x = "Weight (kg)", y = "Density", title = "Density plot - Weight by Gender")
+
+```
+
+The Weights of males and females have a similar distribution and both are right skewed.
+
+```{r}
+Male_weights = Adults$Weight[Adults$Gender == "male"]
+Female_weights = Adults$Weight[Adults$Gender == "female"]
+
+qqplot(Male_weights, Female_weights, main = "QQ plot: Male vs Female Weights",
+       xlab = "Male Weight", ylab = "Female Weight")
+abline(0, 1, col = "red")
+```
+
+We can see in the QQ Plot that the Male and Female weights have an additive shift. We can say that on average males are 12-14 kgs heavier than females.
+
+
+### Q3
+
+```{r}
+model = lm(Height ~ Gender, data = Adults, na.action = na.omit)
+model.fitted = sort(fitted.values(model)) - mean(fitted.values(model))
+model.residuals = sort(residuals(model))
+Adults.fit = data.frame(Fitted = model.fitted, Residuals = model.residuals)
+Adults.fit.long = Adults.fit %>% gather(type, value, Fitted:Residuals)
+ggplot(Adults.fit.long, aes(sample = value)) + stat_qq(distribution = "qunif") +
+  facet_grid(~type) + labs(x = "Quantiles of the standard uniform distribution", 
+                           y = "Values from the model (cm)", 
+                           title = "Residual-fit spread plot for model predicting height from gender")
+
+# Variance Explained
+var(model.fitted)/var(Adults$Height, na.rm = TRUE)
+```
+
+The model captures only 47% of the variation in the data. Since the model contains only Gender as an explanatory variable, it captures little variation in the data, we need to include more explanatory variables to capture more variation through a single model. Hence, this model is fairly limited to correct predictions and thus we should not use it to predict. 
