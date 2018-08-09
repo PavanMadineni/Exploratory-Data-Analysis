@@ -1,0 +1,135 @@
+---
+title: 'Mini-project: GDP and life expectancy'
+author: "S470/670"
+date: "Spring 2018"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, tidy = TRUE, message = FALSE)
+```
+
+## Introduction
+
+We explore the relationship between per capita GDP and life expectancy between 1952 and 2007 using the `gapminder` data set, available in the R package of the same name. We find that both income and time have strong apparent effects on life expectancy, though the details vary substantially from continent to continent.
+
+## GDP and life expectancy in 2007
+
+```{r warning = FALSE}
+# install.packages('gapminder')
+library(gapminder)
+gapminder07 = subset(gapminder, year==2007)
+```
+
+We begin by examining the relationship between GDP per capita and life expectancy in 2007, the most recent year in the data set (Figure 1.) The distribution of GDP per capita among countries is strongly right-skewed, so we take the base 10 log of this variable.
+
+```{r}
+library(ggplot2)
+ggplot(subset(gapminder07, continent != 'Oceania'), aes(x = log10(gdpPercap), y = lifeExp, group = continent, color = continent)) + geom_point(aes(size = pop)) + geom_smooth(aes(weight = pop), method.args = list(degree = 1)) + scale_size_continuous(breaks = c(1e6, 1e7, 1e8, 1e9), labels = c('1 million', '10 million', '100 million', '1 billion')) + xlab('Log 10 GDP per capita (US dollars)') + ylab('Life expectancy') + ggtitle('Figure 1: Life expectancy vs. GDP per capita in 2007') + labs(subtitle = 'Curves are weighted locally linear loess fits. Shaded areas give standard errors', caption = 'Oceania excluded. Data from the Gapminder R package.')
+```
+
+Bigger points correspond to bigger country populations. The curves here are fitted using a weighted loess method, which for each x-value finds a weighted fit based on nearby points. The curves for the the Americas, Asia, Europe, and Oceania are all quite close, while the curve for Africa is substantially lower. There's also more scatter about the trend for countries in Africa.
+
+The evidence that nonlinear fits are required is weak. We therefore offer robust linear fits below (Figure 2), where points far from the trend are moderately downweighted:
+
+```{r}
+library(MASS)
+ggplot(gapminder07, aes(x = log10(gdpPercap), y = lifeExp, group = continent, color = continent)) + geom_point(aes(size = pop)) + geom_smooth(aes(weight = pop), method = 'rlm') + scale_size_continuous(breaks = c(1e6, 1e7, 1e8, 1e9), labels = c('1 million', '10 million', '100 million', '1 billion')) + xlab('Log 10 GDP per capita (US dollars)') + ylab('Life expectancy') + ggtitle('Figure 2: Life expectancy vs. GDP per capita in 2007') + labs(subtitle = 'Lines are from a robust linear model using Huber weights. Shaded areas give standard errors', caption = 'Data from the Gapminder R package.', size = 'Population', color = 'Continent')
+```
+
+The levels and slopes of the lines for the Americas, Asia, Europe, and Oceania are all different, but these differences are comparatively small.
+
+Because the slopes of the lines are all broadly similar, we can get an idea of the magnitude of the effect of GDP on predicted life expectancy by fitting a weighted robust linear model with additive terms for log GDP and continent. (A model with an interaction provides a slightly better fit, but is not as straightforward to interpret.)
+
+```{r, warning = FALSE}
+life.rlm1 = rlm(lifeExp ~ log10(gdpPercap) + continent, weights = pop, data = gapminder07)
+library(broom)
+life.tidy = tidy(life.rlm1)
+life.tidy = life.tidy[, 1:3]
+life.tidy[, 2:3] = round(life.tidy[, 2:3], 1)
+library(knitr)
+kable(life.tidy)
+# var(fitted.values(life.rlm1))
+# var(residuals(life.rlm1))
+```
+
+The coefficient of log GDP says that a GDP per capita ten times higher implies a predicted life expectancy twelve years longer. The coefficients for the continents are relative to Africa. So the life expectancy for a country outside Africa is modeled to be 9--10 years higher than the life expectancy for a country within Africa with the same GDP per capita.
+
+In summary, in 2007, life expectancy consistently increased as a function of per capita GDP. A robust linear model with GDP per capita and continent as additive predictors captured about three-quarters of the variation in life expectancy. The only continent that looks substantially different is Africa, the trend for which seems negatively shifted compared to the other continents: for any given level of GDP per capita, the life expectancy for an African country is ten years lower than for a country in a different continent.
+
+## Life expectancy over time by continent
+
+To account for some countries having much higher populations than others, we take a weighted average of life expectancy by population for each continent and year (Figure 3.)
+
+```{r, warning = FALSE}
+library(dplyr)
+grouped.data = group_by(gapminder, continent, year)
+wLifeLong = summarise(grouped.data, weighted.mean(lifeExp, pop))
+names(wLifeLong) = c("Continent", "Year", "Life")
+ggplot(wLifeLong, aes(x = Year, y = Life, group = Continent, color = Continent)) + geom_line() + xlab('Year') + ylab('Life expectancy') + ggtitle('Figure 3: Weighted average life expectancy by continent, 1952-2007') + labs(caption = 'Data from the Gapminder R package.')
+```
+
+Life expectancy has increased over time. In Oceania, Africa, and the Americas the increase has been quite consistent. The trends are not quite parallel: there's been some convergence. In Africa, life expectancy has been quite flat since 1987. It seems plausible that this is largely or entirely due to AIDS.
+
+The trend is Asia has been the most uneven. The increase was quite inconsistent but generally quite fast up to 1972, so that the gap between Asia and the top three continents decreased considerably during that period. However, there was a notable decrease between 1957 and 1962. Because China and India combined have made up about two-thirds of Asia's population throughout the study period, we split these two countries off from the rest of Asia in Figure 4.
+
+```{r}
+asia.data = subset(gapminder, continent == "Asia")
+asia.data$region = rep('Rest of Asia', nrow(asia.data))
+asia.data$region[asia.data$country == 'China'] = 'China'
+asia.data$region[asia.data$country == 'India'] = 'India'
+asia.grouped = group_by(asia.data, region, year)
+asiaLifeLong = summarise(asia.grouped, weighted.mean(lifeExp, pop))
+names(asiaLifeLong) = c("Country", "Year", "Life")
+ggplot(asiaLifeLong, aes(x = Year, y = Life, group = Country, color = Country)) + geom_line() + xlab('Year') + ylab('Life expectancy') + ggtitle('Figure 4: Life expectancy in Asia, 1952-2007') + labs(caption = 'Data from the Gapminder R package.')
+```
+
+The drop in the Asian weighted life expectancy in 1962 was entirely due to China, coinciding with the Great Leap Forward. However, there was a surge in Chinese life expectancy following this, and China's life expectancy has exceeded the rest of Asia since then.
+
+
+## Changes in the relationship between GDP and life expectancy over time
+
+We now again fit life expectancy as a function of log GDP per capita for each continent, and see how this has changed over the study period. In Figure 5, we draw a different panel for each year to see how the set of trend lines as a whole has changed over time, while in Figure 6 we draw a different panel for each continent (excluding Oceania for lack of variation) to better see how the trend lines have changed over time within each continent.  For simplicity, we use weighted least squares linear fits. In every continent in every year, life expectancy increases with GDP per capita. Interestingly, the lines for each continent become increasingly similar in slope as time progresses. However, as we saw earlier, the levels have not converged: the line for Africa consistently remains below the others.
+
+```{r}
+ggplot(gapminder, aes(x = log10(gdpPercap), y = lifeExp, color = continent)) + geom_point(alpha = 0.2) + geom_smooth(method = 'lm', aes(weight = pop), se = FALSE) + facet_wrap(~year, ncol = 4) + xlab('Log 10 GDP per capita (US dollars)') + ylab('Life expectancy') + ggtitle('Figure 5: Life expectancy vs. GDP per capita by year') + labs(subtitle = 'Lines are weighted least squares linear fits', caption = 'Data from the Gapminder R package.')
+```
+
+In Europe and the Americas, the increase in life expectancy conditional on GDP per capita has been much more pronounced for lower GDP, leading to a degree of convergence between lower and higher GDP countries. (That doesn't mean that life expectancy hasn't gone up in rich countries, since they got even richer.) In Asia, the slope of life expectancy with respect to GDP has been relatively constant, suggesting an additive model with a GDP effect and a year effect would be a good description of the trends there. Africa has been more complicated: the slope got steeper for a while but then flattened, so the predicted life expectancy in its highest GDP countries has actually gone down in recent years.
+
+To give a quantitative idea of the time effect, we fit robust weighted linear models (with continent/log GDP interaction) to the 1952 and 2007 subsets of the data. We see that holding GDP constant, the increase in predicted life expectancy (which can be though of as a time effect) varies from 2 years in well-off European countries to 20 years in poorer American countries.
+
+```{r}
+model52 = rlm(lifeExp ~ log10(gdpPercap) * continent, weights = pop, data = subset(gapminder, year == 1952))
+newdata = data.frame(gdpPercap = c(300, 4000, 1500, 10000, 1000, 10000, 6000, 15000), continent = rep(c("Africa", "Americas", "Asia", "Europe"), each = 2))
+pred52 = predict(model52, newdata)
+model07 = rlm(lifeExp ~ log10(gdpPercap) * continent, weights = pop, data = subset(gapminder, year == 2007))
+pred07 = predict(model07, newdata)
+gdpPreds = data.frame('Continent and GDP' = c('Africa $300', 'Africa $4000', 'Americas $1500', 'Americas $10000', 'Asia $1000', 'Asia $10000', 'Europe $6000', 'Europe $15000'), 'Predicted 1952 life expectancy' = round(pred52, 1), 'Predicted 2007 life expectancy' = round(pred07, 1))
+names(gdpPreds) = c('Continent and per capita GDP', 'Predicted 1952 life expectancy', 'Predicted 2007 life expectancy')
+kable(gdpPreds)
+```
+
+Increases in GDP per capita explain a portion of the increases in life expectancy over the 55 years covered by the data. But in none of the regions do they explain everything: there's also a time effect, though it varies substantially by continent and income.
+
+```{r}
+ggplot(subset(gapminder, continent != 'Oceania'), aes(x = log10(gdpPercap), y = lifeExp, group = year, color = year)) + geom_point(alpha = 0.2) + geom_smooth(method = 'lm', aes(weight = pop), se = FALSE) + facet_wrap(~continent, ncol = 2) + xlab('Log 10 GDP per capita (US dollars)') + ylab('Life expectancy') + ggtitle('Figure 6: Life expectancy vs. GDP per capita by continent') + labs(subtitle = 'Lines are weighted least squares linear fits', caption = 'Oceania excluded. Data from the Gapminder R package.') + scale_color_distiller(palette = 'RdBu')
+```
+
+## Conclusions
+
+**GDP and life expectancy in 2007:** Life expectancy increases with per capita GDP. While the data is insufficient to determine the exact shape of the relationships, these are broadly similar across all continents. The main regional difference is that the curve for Africa is shifted about ten years down relative to the rest of the world.
+
+**Life expectancy over time by continent:** The weighted average life expectancy has increased in all continents. In the more developed continents -- Europe, the Americas, and Oceania -- the increase has been consistent. The gap between Asia and the more developed continents has closed over time, though at a somewhat uneven rate at first due to the outsized effect of political conditions in China and to a lesser extent India (though the convergence has been observed in the rest of Asia as well.) Africa was catching up to the developed regions until 1990, after which its life expectancy leveled out.
+
+**Changes in the relationship between GDP and life expectancy over time:** In all continents, the trend line relating per capita GDP to life expectancy has incrased. This implies there is a time effect as well as an income effect on life expectancy. The paths have been quite different by continent:
+
+*Europe and the Americas:* Predicted life expectancy has increased much faster for lower GDPs than for higher GDPs.
+
+*Asia:* Predicted life expectancy has increased very fast for all GDPs, though at an inconsistent rate.
+
+*Africa:* Predicted life expectancy has increased more for higher GDPs than for lower GDPs.
+
+In general, there has been convergence between rich and poor continents, and between rich and poor countries within continents, with the exception of Africa.

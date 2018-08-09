@@ -1,0 +1,265 @@
+---
+title: 'Mini-project: Who switched to Trump?'
+author: "S470/670"
+date: "Spring 2018"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, echo = FALSE, tidy = TRUE, message = FALSE)
+set.seed(470670)
+```
+
+To what extent do attitudes toward immigration explain the switching of votes of 2012 Obama supporters who became 2016 Trump supporters?
+
+We use data from the 2016 Cooperative Congression Election Study to attempt to answer this. The population of interest is taken to be all people who voted for Barack Obama in the 2012 Presidential general election who were eligible to vote in the 2016 Presidential general election. In the first section, we will see to what extent member of this population switching their votes to Donald Trump can be explained by individual demographic variables: gender, education, race, and party identification. We also construct an index to describe attitudes toward immigration and see how this relates to vote switching. In the second section, we test out models with immigration and one other explanatory variable to predict vote switching, looking for interactions. In the third section, we construct two large models to predict vote switching, one with immigration and without, and examine the differences. In all cases, we use the CCES survey weights to improve the representativeness of the data.
+
+```{r, cache = TRUE}
+load("CCES16_Common_OUTPUT_Feb2018_VV.RData")
+library(tidyverse)
+```
+
+```{r, warning = FALSE, cache = TRUE}
+post = subset(x, tookpost == "Yes")
+obama = subset(post, CC16_326 == "Barack Obama")
+# dim(obama)
+# CC16_410a: vote
+# CC16_422e: racial anxiety
+
+obama = obama[, c("commonweight_vv_post", "gender", "educ", "race", "pid7", "CC16_331_1", "CC16_331_2", "CC16_331_3", "CC16_331_7", "CC16_410a")]
+names(obama) = c("weight", "gender", "education", "race", "party", "amnesty", "wall", "daca", "deport", "vote")
+Trump = (obama$vote == "Donald Trump (Republican)")
+Trump[is.na(Trump)] = FALSE
+obama = data.frame(obama, Trump)
+# dim(obama)
+library(dplyr)
+obama$race4 = recode(obama$race, "White" = "White", "Black" = "Black", "Hispanic" = "Hispanic", .default = "Other")
+obama$immigration = (obama$wall == "No") + (obama$deport == "No") + (obama$amnesty == "Yes") + (obama$daca == "Yes")
+obama$party.num = recode(obama$party, "Strong Democrat" = -3, "Not very strong Democrat" = -2, "Lean Democrat" = -1, "Independent" = 0, "Lean Republican" = 1, "Not very strong Republican" = 2, "Strong Republican" = 3, "Not sure" = 0)
+# summary(obama)
+```
+
+## Univariate summaries
+
+We study the 23,395 people in the 2016 CCES survey who said they voted for Obama for in the 2012 Presidential general election. We find that 10.9% of them (using survey weights) said they voted for Trump in the 2016 Presidential general election. We check how this breaks down by demographic:
+
+```{r, warning = FALSE}
+### to do: reorder things
+library(dplyr)
+library(knitr)
+#summarise(obama, weighted.mean(Trump, weight))
+gender.kable = summarise(group_by(obama, gender), weighted.mean(Trump, weight))
+gender.kable$Variable = "Gender"
+counts = count(obama, gender)
+gender.kable = merge(gender.kable, counts)
+names(gender.kable) = c("Group", "Percent who switched to Trump", "Variable", "Number of Obama voters")
+education.kable = summarise(group_by(obama, education), weighted.mean(Trump, weight))
+education.kable$Variable = "Education"
+counts = count(obama, education)
+education.kable = merge(education.kable, counts)
+names(education.kable) = c("Group", "Percent who switched to Trump", "Variable", "Number of Obama voters")
+# Fix order
+education.kable = education.kable[c(4, 3, 6, 1, 2, 5),]
+race.kable = summarise(group_by(obama, race4), weighted.mean(Trump, weight))
+race.kable$Variable = "Race"
+counts = count(obama, race4)
+race.kable = merge(race.kable, counts)
+names(race.kable) = c("Group", "Percent who switched to Trump", "Variable", "Number of Obama voters")
+race.kable = race.kable[c(1, 3, 2, 4),]
+party.kable = summarise(group_by(obama, party), weighted.mean(Trump, weight))
+party.kable$Variable = "Party"
+counts = count(obama, party)
+party.kable = merge(party.kable, counts)
+names(party.kable) = c("Group", "Percent who switched to Trump", "Variable", "Number of Obama voters")
+party.kable = party.kable[c(7, 2, 5, 1, 4, 6, 3, 8, 9),]
+all.kable = rbind(gender.kable, education.kable, race.kable, party.kable)
+all.kable[,2] = round(all.kable[,2] * 100, 1)
+all.kable = subset(all.kable, select = c("Variable", "Group", "Number of Obama voters", "Percent who switched to Trump"))
+row.names(all.kable) = c()
+kable(all.kable)
+```
+
+The results line up with conventional wisdom. Male Obama voters were more likely to switch to Trump than female Obama voters, though the gender gap is reasonably small. Obama with a four-year college degree or more education were less likely to switch than those without a four-year college degree. Non-Hispanic white Obama voters were more likely to switch than minorities. Finally, by far the strongest predictor of switching was party identification: those who leaned Republican were likely to vote for Trump even if they voted for Obama, while Democrats were likely to stay loyal. (Of course, a much greater number of Obama voters were Democrats than Republicans.)
+
+We also construct an "immigration attitude" variable from responses to four CCES questions asking what the U.S. government should do about immigration:
+
+- Grant legal status to all illegal immgrants who have held jobs and paid taxes for at least 3 years, and not been convicted of any felony crimes (Yes = 1, No = 0)
+- Increase the number of border patrols on the U.S.-Mexican border (No = 1, Yes = 0)
+- Grant legal status to people who were brought to the US illegally as children, but who have graduated from a U.S. high school (Yes = 1, No = 0)
+- Identify and deport illegal immigrants (No = 1, Yes = 0)
+
+The "immigration attitudes" variable was the sum of these four responses, with 4 being the most positive toward immigration and 0 being the most negative. Note that all these questions are about undocumented immigration, which was the most salient immigration issue during the 2016 campaign; it is possible that asking questions about legal immigration would have substantively different results, though I personally would be surprised if that were the case.
+
+```{r}
+by.immigration = summarise(group_by(obama, immigration), weighted.mean(Trump, weight))
+names(by.immigration) = c("immigration", "TrumpPct")
+# by.immigration
+library(ggplot2)
+ggplot(by.immigration, aes(x = immigration, y = 100 * TrumpPct)) + geom_line() + xlab("Number of positive responses to four CCES immigration questions") + ylab("Percent voting for Trump") + ggtitle("Percent of Obama voters switching to Trump by immigration attitude") + ylim(0, 40)
+```
+
+As might be expected by those who followed the 2016 campaign, Obama voters who were negative to immigration were more likely to switch to Trump than those who were positive.
+
+Looking at the spread of percentages for each variable, it seems that party ID has the strongest relationship with vote switching, followed by immigration, race, education, and gender.
+
+## Interactions between immigration attitudes and demographic variables
+
+Before fitting the model, it would be prudent to check the relationship between immigration and the demographic variables. We see a relationship between immigration attitude and party identification (we drop the few NA's):
+
+```{r}
+immigration.by.party = summarise(group_by(subset(obama, party != 'NA'), party), mean(immigration))
+names(immigration.by.party) = c("Party ID", "Mean immigration attitude (0-4 scale)")
+kable(immigration.by.party, digits = 2)
+ggplot(subset(obama, party != 'NA'), aes(x = immigration)) + geom_histogram(aes(y = ..density..), binwidth = 1) + facet_wrap(~party, ncol = 3)
+```
+
+Democrats tend to be more positive toward immigration than Republicans. (Interestingly, this seems just as true of weak partisans as of strong partisans.) So we need to check that the apparently strong relationship between negative immigration attitudes and switching to Trump isn't just confounding due to party ID.
+
+\pagebreak
+
+There's also a relationship between immigration attitude and education:
+
+```{r}
+immigration.by.education = summarise(group_by(subset(obama, party != 'NA'), education), mean(immigration))
+names(immigration.by.education) = c("Education", "Mean immigration attitude (0-4 scale)")
+kable(immigration.by.education, digits = 2)
+ggplot(obama, aes(x = immigration)) + geom_histogram(aes(y = ..density..), binwidth = 1) + facet_wrap(~education, ncol = 3)
+```
+
+More educated people tend to have more positive attitudes toward immigration, though again the monotonicity is broken by "some college" respondents being slightly more pro-immigration than two-year college degree holders.
+
+On the other hand, the relationships between immigration attitudes, race, and gender are quite weak.
+
+\pagebreak
+
+### Predicting switching by immigration attitude and party identification
+
+We now use weighted logistic regression to model the probability of an Obama voter switching to Trump by immigration attitude and party ID. For this analysis we use party ID as a numeric variable, since the relationship between party and vote switching seems monotonic. (Respondents who were "not sure" about party ID were coded as independent, while the small number of NA's were ignored.)
+
+```{r, warning = FALSE}
+partyIm.glm = glm(Trump ~ party.num + immigration, weights = weight, family = "binomial", data = obama)
+# summary(partyIm.glm)
+partyIm.int.glm = glm(Trump ~ party.num * immigration, weights = weight, family = "binomial", data = obama)
+# summary(partyIm.int.glm)
+grid = expand.grid(party.num = -3:3, immigration = 0:4)
+prob.no = predict(partyIm.glm, newdata = grid, type = "response", se.fit = TRUE)$fit
+prob.int = predict(partyIm.int.glm, newdata = grid, type = "response", se.fit = TRUE)$fit
+grid2 = data.frame(grid, prob.no, prob.int)
+library(tidyr)
+grid2 = gather(grid2, key = model, value = prob, c("prob.no", "prob.int"))
+grid2$model = recode_factor(grid2$model, "prob.no" = "No interaction", "prob.int" = "With interaction")
+grid2$party.num = recode_factor(grid2$party.num, `-3` = "Strong Democrat", `-2` = "Not very strong Democrat", `-1` = "Lean Democrat", `0` = "Independent", `1` = "Lean Republican", `2` = "Not very strong Republican", `3` = "Strong Republican")
+ggplot(grid2, aes(x = immigration, y = prob, group = model, color = model)) + geom_line() + facet_wrap(~party.num, ncol = 3) + xlab("Number of positive responses to CCES immigration questions") + ylab("Probability of voting Trump") + ggtitle("Models for chance of Obama voters switching to Trump") + labs(subtitle = "By party identification and immigration attitude")
+```
+
+The two models are very similar. The effect of immigration attitude is very similar by party; it's just that Republicans who voted for Obama have a higher baseline chance of switching to Trump compared to Democrats.
+
+\pagebreak
+
+### Predicting switching by immigration attitude and gender
+
+```{r, warning = FALSE}
+genderIm.glm = glm(Trump ~ gender + immigration, weights = weight, family = "binomial", data = obama)
+# summary(genderIm.glm)
+genderIm.int.glm = glm(Trump ~ gender * immigration, weights = weight, family = "binomial", data = obama)
+# summary(genderIm.int.glm)
+grid = expand.grid(gender = c("Male", "Female"), immigration = 0:4)
+prob.no = predict(genderIm.glm, newdata = grid, type = "response", se.fit = TRUE)$fit
+prob.int = predict(genderIm.int.glm, newdata = grid, type = "response", se.fit = TRUE)$fit
+grid2 = data.frame(grid, prob.no, prob.int)
+grid2 = gather(grid2, key = model, value = prob, c("prob.no", "prob.int"))
+grid2$model = recode_factor(grid2$model, "prob.no" = "No interaction", "prob.int" = "With interaction")
+ggplot(grid2, aes(x = immigration, y = prob, group = model, color = model)) + geom_line() + facet_grid(~gender) + xlab("Number of positive responses to CCES immigration questions") + ylab("Probability of voting Trump") + ggtitle("Models for chance of Obama voters switching to Trump") + labs(subtitle = "By gender and immigration attitude")
+```
+
+The two models are extremely similar. The effect of immigration attitude is basically the same for male and female Obama voters, but men start out with a higher likelihood of switching.
+
+\pagebreak
+
+### Predicting switching by immigration attitude and race
+
+```{r, warning = FALSE}
+raceIm.glm = glm(Trump ~ race4 + immigration, weights = weight, family = "binomial", data = obama)
+# summary(raceIm.glm)
+raceIm.int.glm = glm(Trump ~ race4 * immigration, weights = weight, family = "binomial", data = obama)
+# summary(raceIm.int.glm)
+grid = expand.grid(race4 = c("White", "Black", "Hispanic", "Other"), immigration = 0:4)
+prob.no = predict(raceIm.glm, newdata = grid, type = "response", se.fit = TRUE)$fit
+prob.int = predict(raceIm.int.glm, newdata = grid, type = "response", se.fit = TRUE)$fit
+grid2 = data.frame(grid, prob.no, prob.int)
+grid2 = gather(grid2, key = model, value = prob, c("prob.no", "prob.int"))
+grid2$model = recode_factor(grid2$model, "prob.no" = "No interaction", "prob.int" = "With interaction")
+ggplot(grid2, aes(x = immigration, y = prob, group = model, color = model)) + geom_line() + facet_wrap(~race4, ncol = 2)  + xlab("Number of positive responses to CCES immigration questions") + ylab("Probability of voting Trump") + ggtitle("Models for chance of Obama voters switching to Trump") + labs(subtitle = "By race and immigration attitude")
+```
+
+We see more substantively differences here. For white Obama voters, the curve for the interaction model is steeper than the model without interaction. So anti-immigration white Obama voters were even more likely to switch than would be predicted by an additive model. Conversely, the interaction model's curves for minorities are less steep, especially the one for Hispanic Obama voters. This means that even the most anti-immigration Hispanic Obama voters were less likely to switch to Trump than a simple additive model would predict. This could be by immigration generally being a more important determinant of vote switching for white Obama voters than for minorities.
+
+\pagebreak
+
+### Predicting switching with immigration attitude and education
+
+```{r, warning = FALSE}
+edIm.glm = glm(Trump ~ education + immigration, weights = weight, family = "binomial", data = obama)
+# summary(edIm.glm)
+edIm.int.glm = glm(Trump ~ education * immigration, weights = weight, family = "binomial", data = obama)
+# summary(edIm.int.glm)
+grid = expand.grid(education = c("No HS", "High school graduate", "Some college", "2-year", "4-year", "Post-grad"), immigration = 0:4)
+prob.no = predict(edIm.glm, newdata = grid, type = "response", se.fit = TRUE)$fit
+prob.int = predict(edIm.int.glm, newdata = grid, type = "response", se.fit = TRUE)$fit
+grid2 = data.frame(grid, prob.no, prob.int)
+grid2 = gather(grid2, key = model, value = prob, c("prob.no", "prob.int"))
+grid2$model = recode_factor(grid2$model, "prob.no" = "No interaction", "prob.int" = "With interaction")
+ggplot(grid2, aes(x = immigration, y = prob, group = model, color = model)) + geom_line() + facet_wrap(~education, ncol = 3)  + xlab("Number of positive responses to CCES immigration questions") + ylab("Probability of voting Trump") + ggtitle("Models for chance of Obama voters switching to Trump") + labs(subtitle = "By education and immigration attitude")
+```
+
+Again, there's a big difference between the two models. In general, the model with an interaction gives curves that are less steep for less educated groups and more steep for more educated groups than an additive model (with some exceptions.) Perhaps Obama voters with post-grad degrees were more likely to decide their votes based on immigration and similar issues, while less educated voters may have had other priorities. However, note that all the curves slope downward: within every educational group, less support for immigration was associated with a higher probability of switching to Trump.
+
+In summary, immigration attitudes interact substantially with race and education when it comes to predicting vote switching. Interactions with party and gender are much smaller; while there's no harm in putting in a model, we choose to drop them for simplicity.
+
+## Models with and without immigration
+
+We fit a big model with immigration as a predictor:
+
+```{r}
+obama$gender = factor(obama$gender, ordered = FALSE)
+obama$race4 = factor(obama$race4, ordered = FALSE)
+obama$education = recode_factor(obama$education, "High school graduate" = "HS graduate")
+obama$education = factor(obama$education, ordered = FALSE)
+bigIm.glm = glm(Trump ~ immigration + party.num + gender + race4 + education + immigration:race4 + immigration:education, weights = weight, na.action = na.exclude, family = "quasibinomial", data = obama)
+library(arm)
+display(bigIm.glm) # Change to plot?
+prediction.df = expand.grid(immigration = 0:4, party.num = -3:3, gender = c("Male", "Female"), race4 = c("White", "Black", "Hispanic", "Other"), education = c("No HS", "HS graduate", "Some college", "2-year", "4-year", "Post-grad"))
+bigIm.fit = predict(bigIm.glm, newdata = prediction.df, type = "response")
+bigIm.df = data.frame(prediction.df, probability = as.vector(bigIm.fit))
+bigIm.df$model = rep("With immigration", nrow(bigIm.df))
+```
+
+There is a large positive coefficient associated with being Republican rather than Democratic. There are large negative coefficients associated with positive immigration attitudes, being female (relative to male), and being a racial minority (relative to being white.) The coefficients for the different education levels are difficult to interpret in isolation (since they're not that much larger in magnitude than the interaction coefficients), so we will deal with them graphically later.
+
+Fit a big model without immigration:
+
+```{r}
+bigNoIm.glm = glm(Trump ~ party.num + gender + race4 + education, weights = weight, family = "quasibinomial", na.action = na.exclude, data = obama)
+display(bigNoIm.glm) # Change to plot
+bigNoIm.fit = predict(bigNoIm.glm, newdata = prediction.df, type = "response")
+bigNoIm.df = data.frame(prediction.df, probability = as.vector(bigNoIm.fit))
+bigNoIm.df$model = rep("Without immigration", nrow(bigNoIm.df))
+big.df = rbind(bigIm.df, bigNoIm.df)
+```
+
+The general patterns here are similar, although of course the exact numbers are different. We now compare the models' predictions for male independents of different races and education levels (graphs for other gender-party combinations show the same basic patterns):
+
+```{r}
+ggplot(subset(big.df, party.num == 0 & gender == 'Male'), aes(x = immigration, y = probability, group = model, color = model)) + geom_line() + facet_wrap(~race4 + education, ncol = 6) + xlab("Number of positive responses to CCES immigration questions") + ylab("Probability of voting Trump") + ggtitle("Models for chance of Obama voters switching to Trump") + labs(subtitle = "By race, education, and immigration attitude")
+```
+
+The two models are very different, indicating that immigration attitudes have a huge amount of predictive power even after accounting for demographic variables. Furthermore, the effect size is massive. For example, race is very well known to be a huge factor in voting, but the models says minorities who were very negative toward immigration were more likely to switch than whites who were very positive toward immigration (keeping gender and party constant.) Immigration attitudes seem to be even more salient for white Obama voters, with male independents who responded negatively to all four CCES immigration questions predicted to be more likely than not to vote for Trump, regardless of education level. We can't prove from this data that negative attitudes toward immigration were *causing* some Obama voters to switch to Trump (since immigration attitudes may be confounded with any number of other variables), but the data is certainly consistent with this story. We also note that positive attitudes toward immigration may have led some voters who would have otherwise switched to refuse to vote for Trump (though even if the effects evened out, it might still be an advantage to Trump due to the peculiarities of the Electoral College.)
+
+In conclusion, of 2012 Obama voters, Republicans were unsurprisingly the most likely to switch to voting for Trump. Since not many Republicans voted for Obama in the first place and their return to their party may have been inevitable, this may not be a huge deal for the Democratic Party. A bigger concern might be that, according to this data, around a quarter of independent Obama voters switched to Trump. We'd need to compare this to vote switching data from previous elections to see if this was unusual.
+
+Perhaps even more importantly, attitudes toward immigration were a strong predictor of switching to Trump. About 39% of the Obama voters least favorable toward immigration, as measured by CCES responses, switched to Trump, compared to about 2% of the Obama voters most favorable toward immigration. (It would be interesting to do a similar analysis of 2012 Romney voters.) The relationship continues to hold after The data is consistent with immigration attitudes being a stronger determinant of vote switching for white Obama voters, and for Obama voters with at least a college degree. Very speculatively, the Democratic Party might be able to win back such voters without changing policy by making the issue of immigration less salient, though this might result in losing other voters and is easier said than done in any case. For their part, the Republican Party might be well-served by making immigration a major issue for some time to come.
+
+
+
